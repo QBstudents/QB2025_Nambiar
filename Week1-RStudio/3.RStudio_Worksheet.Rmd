@@ -410,6 +410,7 @@ The remaining columns of data refer to the biomass (µg/L) of different zooplank
 Describe what you learned below in the "Answer" section and include appropriate code in the R chunk.
 
 ```{r}
+library(performance)
 zoops<-read.table("C:/Users/ADMIN/OneDrive/Documents/GitHub/QB2025_Nambiar/Week1-RStudio/data/zoops.txt", sep = "\t", header = TRUE)
 zoops
 
@@ -472,6 +473,22 @@ ggplot(long_zoops, aes(x = NUTS, y = biomass, fill = Sp)) +
     legend.position = "bottom"  # Position the legend below
   )
 
+####-------Violin plot 2
+
+ggplot(long_zoops, aes(x = NUTS, y = biomass, fill = Sp)) +
+  geom_violin(trim = TRUE, position = position_dodge(width = 0.8), alpha = 0.7) +  # Violin plot
+  geom_point(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1.5, alpha = 0.6) +  # Add data points
+  labs(
+    title = "Biomass of Zooplankton Species Across Nutrient Enrichment Levels",
+    x = "Nutrient Treatment",
+    y = "Biomass",
+    fill = "Species (Sp)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    legend.position = "bottom"  # Position the legend below
+  )
 ##anova to see difference in the response of biomass to nutrient enrichmeent
 
 anova <- aov(biomass ~ NUTS * Sp, data = long_zoops) 
@@ -515,7 +532,7 @@ ggplot(merged_zoops, aes(x = TIN, y = CHYD)) +
 # Fit a linear model
 lm_CHYD <- lm(CHYD ~ TIN, data = merged_zoops)
 
-
+check_distribution(lm_CHYD)
 summary(lm_CHYD)
 
 #####-SIMO 
