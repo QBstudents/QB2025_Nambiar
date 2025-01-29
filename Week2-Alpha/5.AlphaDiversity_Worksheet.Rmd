@@ -34,7 +34,7 @@ In the R code chunk below, please provide the code to: 1) Clear your R environme
 
 setwd("C:/Users/ADMIN/OneDrive/Documents/GitHub/QB2025_Nambiar/Week2-Alpha/data")
 
-mic<-read.table("C:/Users/ADMIN/OneDrive/Documents/GitHub/QB2025_Nambiar/Week2-Alpha/data/soilbac.txt", sep = "\t", header = TRUE)
+
 
 getwd()
 
@@ -132,7 +132,7 @@ C<- function(x){
 g_coverage<-C(BCI)
 g_coverage      #coverage for all sites.
 
-site1
+
 
 
 
@@ -181,6 +181,8 @@ In the R code chunk below, do the following:
 5.  Calculate coverage of that site
 
 ```{r}
+mic<-read.table("C:/Users/ADMIN/OneDrive/Documents/GitHub/QB2025_Nambiar/Week2-Alpha/data/soilbac.txt", sep = "\t", header = TRUE)
+
 mic #microbial dataset
 
 summary(mic) #examining the data
@@ -261,8 +263,8 @@ S.chao2 <- function(site , SbyS){
   SbyS <- as.data.frame(SbyS)
   x <- SbyS[site, ]
   SbyS.pa <- (SbyS > 0) * 1 # convert the SbyS to presence/absence
-  Q1 <- sum(colSums(SbyS.pa) == 1) # species observed once
-  Q2 <- sum(colSums(SbyS.pa) == 2) # species observed twice
+  Q1 <- sum(colSums(SbyS.pa) == 1) 
+  Q2 <- sum(colSums(SbyS.pa) == 2) 
   S.chao2 <- S.obs(x) + (Q1^2) / (2 * Q2)
   return(S.chao2)
 }
@@ -271,17 +273,12 @@ S.chao2 <- function(site , SbyS){
 
 S.ace <- function(x , thresh = 10){
   x <- x[x > 0]
-  S.abund <- length(which(x > thresh)) # excludes zero-abundance taxa
+  S.abund <-  length(which(x > thresh)) 
   S.rare <- length(which(x <= thresh)) # richness of abundant taxa
-  singlt <- length(which(x == 1))      # richness of rare taxa
-  N.rare <- sum(x[which(x <= thresh)]) # number of singleton taxa
-  C.ace <- 1 - (singlt / N.rare)       # abundance of rare individuals
-  i <- c(1:thresh)                     # coverage (prop non-singlt rare inds)
-  count <- function(i, y){             # threshold abundance groups
-    length(y[y == i])                  # counter to go through range
-  }
-  f.i <- sapply(i, count, x)           # number of individuals in richness i
-  g.f.i <- (i * (i - 1)) * x           # h(k(k-1))k sensu Gotelli
+  singlt <-  length(which(x == 1))  # richness of rare taxa
+  N.rare <-  sum(x[which(x <= thresh)]) # number of singleton taxa
+  C.ace <- 1 - (singlt / N.rare)       
+  g.f.i <- (i * (i - 1)) * x           
   S.ace <- S.rare / C.ace * (sum(f.i) / (N.rare * (N.rare - 1)))
   S.ace <- S.abund + S.rare / C.ace + (singlt / C.ace) * max(S.ace, 0)
   return(S.ace)
@@ -290,7 +287,7 @@ S.ace <- function(x , thresh = 10){
 
 
 #site 1 at BCI
-v<-S.chao1(BCI[1,])
+v<-S.chao1(BCI)
 v
 
 
@@ -452,7 +449,7 @@ rac_site1 <- RAC(site1)
 #  sequence of ranks
 ranks <- seq(1, length(rac_site1$x.ab.ranked))
 
-# Plot the RAC with natural-log-transformed abundances
+# Plot the RAC with log-transformed abundances
 plot(ranks, log(rac_site1$x.ab.ranked), type = 'p',  
      xlab = "Rank in abundance", ylab = "log(abundance)",  
      las = 1, cex.lab = 1.4, cex.axis = 1.25, col = "blue", pch = 16)
