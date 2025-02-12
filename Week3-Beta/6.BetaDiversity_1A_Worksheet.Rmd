@@ -421,6 +421,7 @@ library(vegan)
 fish.pcoa <- add.spec.scores.class(fish.pcoa,fishREL, method = "pcoa.scores")
 
 # Convert species projections into a data frame
+
 species_proj <- data.frame(
   PCoA1 = fish.pcoa$cproj[,1],
   PCoA2 = fish.pcoa$cproj[,2],
@@ -449,13 +450,17 @@ spe.corr <- add.spec.scores.class(fish.pcoa, fishREL, method = "cor.scores")$cpr
 corrcut <- 0.7 #user defined cutoff
 imp.spp <- spe.corr[abs(spe.corr[,1]) >= corrcut | abs(spe.corr[,2]) >= corrcut, ]
 
-#Permutation test for Spcies Abundances Acros Axes
+#Permutation test for Species Abundances Across Axess
+
+
 fit <- envfit(fish.pcoa, fishREL, perm = 999)
 fit
 
-#Create "Factors" vector
+#  Create Factors vector
 
 quality <- c(rep("HQ", 13), rep("MQ", 5), rep("LQ", 6), rep("MQ", 5))
+
+
 #Run PERMANOVA with adonis function
 
 adonis2(fish ~ quality, method = "bray", permutations = 999)

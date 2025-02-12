@@ -42,9 +42,12 @@ In the R code chunk below, provide the code to:
 4. load the `vegan` R package (be sure to install if needed).  
 
 ```{r}
+getwd()
+setwd("C:/Users/ADMIN/OneDrive/Documents/GitHub/QB2025_Nambiar/Week4-Beta")
 
-
-
+library(vegan)
+library(ade4)
+library(indicspecies)
 
 ```
 
@@ -55,6 +58,7 @@ In the R code chunk below, load the `doubs` dataset from the `ade4` package
 ```{r}
 # note, pleae do not print the dataset when submitting
 
+data(doubs)
 
 
 ```
@@ -69,14 +73,26 @@ In the code chunk below, test the hypothesis that fish community composition var
 2. use the multivariate analyses for categorical predictors to describe how fish community structure relates to habitat quality.
 
 ```{r}
+data(doubs)
+
+# factors vector
+fish<-doubs$fish
+fish<-fish[-8,]
+dim(fish)
+quality<-c(rep("HQ",13), rep("MQ",5), rep("LQ", 6), rep("MQ", "5"))
+length(quality)
+#run PERMANOVA with adonis function
+
+adonis2(fish~quality, method="bray", permutation=999) #Permanova
+
+indval<-multipatt(fish, cluster=quality, func="IndVal.g", control=how(nperm=999))
+summary(indval)
 
 
+fish.rel<-decostand(fish,method="total")
+phi<-multipatt(fish.rel,cluster=quality, func="r.g", control=how(nperm=999))
 
-
-
-
-
-
+summary(phi)
 
 ```
 
@@ -84,7 +100,7 @@ In the code chunk below, test the hypothesis that fish community composition var
 Are the different analyses consistent with one another and do they agree with the visualizations (heat maps, cluster dendograms, ordinations) that you created?
 
 > ***Answer 1***: 
-
+Through PERMANOVA we can tell that there are significant differences in habitat types based on species composition, the INDval analysis help tell us about "indicator species" that are associated with certain habitat characteristics and we see that Alal, Gogo and Ruru are some of the strongest indicators. The phi coefficients help with the quantification of species habitat - association - biggest takwawy here is that 9 species are associated with a single habitat type while 9 are associated with 2 habitats.  Our results hear are consistent with the visialuzations that was created in the previous assignment. 
 
 ### B.  Multivariate Procedures for Continuous Designs
 
@@ -95,17 +111,19 @@ In the R code chunk below, do the following:
 2. use a Mantel test to test the hypothesis that fish assemblages are correlated with stream environmental variables.
 
 ```{r}
+#data(doubs)
+fish.dist<-vegdist(fish, method="bray")
+env.dist<-vegdist(scale(doubs$env[-8,]),method="euclid")
 
-
-
-
+#mantel test
+mantel(fish.dist,env.dist)
 
 ```
 
 ***Question 2***: What do the results from our Mantel test suggest about fish diversity and stream environmental conditions? 
 How does this relate to your hypothesis about stream quality influencing fish communities?
 
-> ***Answer 2***:  
+> ***Answer 2***:  Based off the significant mantel's correlation beteen community composition and the habitat enviornmental variables i.e. what is the in  doubs$en we see that environmental conditions are linked with species composition. Hence similarity in env conditions would liekly lead to similarity in community composition.  
 
 ### ii.  Constrained Ordination
 In the R code chunk below, do the following:  
@@ -118,15 +136,73 @@ In the R code chunk below, do the following:
 6. plot the constrained ordination results including labeled points for each site, and
 7. add vectors that demonstrate the influence of each environmental factor the constrained ordination.   
 ```{r}
+#env variables
+
+env.chem<-as.matrix(doubs$env[-8,5:11])
+
+fish.db<-vegdist(fish, method="bray", upper=TRUE, diag = T)
+
+#perform dbRDA
+
+doubs.dbrda<-dbrda(fish.db~.,as.data.frame(env.chem))
+
+ordiplot(doubs.dbrda) #ordination plot
+
+# Null model (intercept only)
+doubs.dbrda.mod0 <- dbrda(fish.db ~ 1, as.data.frame(env.chem))
+ordiplot(doubs.dbrda.mod0) # Simple MDS (i.e., PCoA)
+
+# Full model (all explanatory variables)
+doubs.dbrda.mod1 <- dbrda(fish.db ~ ., as.data.frame(env.chem))
+
+# Stepwise selection (AIC-based)
+doubs.dbrda <- ordiR2step(doubs.dbrda.mod0, doubs.dbrda.mod1, perm.max = 200)
+
+# View selected model
+doubs.dbrda$call
+doubs.dbrda$anova
+ordiplot(doubs.dbrda)
+
+# Permutation tests for significance
+permutest(doubs.dbrda, permutations = 999)
+envfit(doubs.dbrda, env.chem[, c(4,6,7)], perm = 999)
+
+# Explained variation
+dbrda.explainvar1 <- round(doubs.dbrda$CCA$eig[1] / 
+  sum(c(doubs.dbrda$CCA$eig, doubs.dbrda$CA$eig)), 3) * 100
+dbrda.explainvar2 <- round(doubs.dbrda$CCA$eig[2] / 
+  sum(c(doubs.dbrda$CCA$eig, doubs.dbrda$CA$eig)), 3) * 100
 
 
+# Set plot margins
+par(mar = c(5, 5, 4, 4) + 0.1)
 
+# Initialize plot
+plot(scores(doubs.dbrda, display = "wa"), xlim = c(-1.3, 1.1), ylim = c(-1.1, 2.7),
+     xlab = paste("dbRDA 1 (", dbrda.explainvar1, "%)", sep = ""),
+     ylab = paste("dbRDA 2 (", dbrda.explainvar2, "%)", sep = ""),
+     pch = 16, cex = 2.0, type = "n", cex.lab = 1.5, cex.axis = 1.2, axes = FALSE)
 
+# Add axes
+axis(side = 1, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+axis(side = 2, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+abline(h = 0, v = 0, lty = 3)
+box(lwd = 2)
 
+# Add points and labels
+points(scores(doubs.dbrda, display = "wa"), pch = 19, cex = 3, bg = "gray", col = "gray")
+text(scores(doubs.dbrda, display = "wa"), labels = row.names(scores(doubs.dbrda, display = "wa")))
 
+# Add environmental vectors
+vectors <- scores(doubs.dbrda, display = "bp")
+arrows(0, 0, vectors[,1], vectors[,2], lwd = 2, lty = 1, length = 0.2, col = "red")
+text(vectors[,1], vectors[,2], pos = 3, labels = row.names(vectors))
 
-
-
+# Add additional axes for vectors
+axis(side = 3, lwd.ticks = 2, cex.axis = 1.2, las = 1, col = "red", lwd = 2.2,
+     at = pretty(range(vectors[,1])), labels = pretty(range(vectors[,1])))
+axis(side = 4, lwd.ticks = 2, cex.axis = 1.2, las = 1, col = "red", lwd = 2.2,
+     at = pretty(range(vectors[,2])) * 2, labels = pretty(range(vectors[,2])))
 
 
 
@@ -141,7 +217,7 @@ In the R code chunk below, do the following:
 
 ***Question 3***: Based on the constrained ordination, what are the environmental variables (or groups of correlated variables) that seem to be contributing to variation in fish community structure?
 
-> ***Answer 3***: 
+> ***Answer 3***:  We see that the largest contributors to the variation in the env variables are bdo, oxy and nit.Wee see this from the dbRDA analysis i.e. all variables with high rsquared values.The DbRDA plot can be used to see the most significant variables and also covariation between the environmental variables.  
 
 ### iii. Variation Partitioning
 In the code chunk below,   
@@ -154,17 +230,75 @@ In the code chunk below,
 6. Plot the variation partitioning output to visualize it.  
 ```{r}
 
+doubs.dbrda$anova
+
+env.mod<-model.matrix(~oxy+bdo+nit,as.data.frame(env.chem))[,-1]
+
+fish<-doubs$fish[-8, ]
+dim(fish)
+# Weight each site by relative abundance
+rs <- rowSums(fish) / sum(fish)
+xy<-doubs$xy[-8, ]
+dim(xy)
+# Perform PCNM
+doubs.pcnm <- pcnm(dist(xy), w = rs, dist.ret = TRUE)
+
+# Keep only meaningful eigenvectors (positive eigenvalues)
+
+# Find valid eigenvectors with positive eigenvalues
+valid_eigenvectors <- which(doubs.pcnm$values[1:ncol(doubs.pcnm$vectors)] > 0)
+
+# Check if valid eigenvectors exist
+if (length(valid_eigenvectors) > 0) {
+    doubs.pcnm$vectors <- doubs.pcnm$vectors[, valid_eigenvectors, drop = FALSE]
+} else {
+    stop("No positive eigenvalues found. Check PCNM computation.")
+}
 
 
 
+# Model selection for PCNM axes
+doubs.space <- as.data.frame(scores(doubs.pcnm))
+doubs.pcnm.mod0 <- dbrda(fish.db ~ 1, doubs.space)
+doubs.pcnm.mod1 <- dbrda(fish.db ~ ., doubs.space)
+step.pcnm <- ordiR2step(doubs.pcnm.mod0, doubs.pcnm.mod1, perm.max = 200)
 
+# View selected model
+step.pcnm$anova
 
+# Construct spatial model using selected PCNM axes
+space.mod <- model.matrix(~ PCNM2 + PCNM3 + PCNM5 + PCNM1 + PCNM13 + PCNM16 + PCNM6, doubs.space)[, -1]
+
+# Constrained ordinations
+doubs.total.env <- dbrda(fish.db ~ env.mod)
+doubs.total.space <- dbrda(fish.db ~ space.mod)
+
+# Partial constrained ordinations
+doubs.env.cond.space <- dbrda(fish.db ~ env.mod + Condition(space.mod))
+doubs.space.cond.env <- dbrda(fish.db ~ space.mod + Condition(env.mod))
+
+# Test significance of dbRDA fractions
+permutest(doubs.env.cond.space, permutations = 999)
+permutest(doubs.space.cond.env, permutations = 999)
+permutest(doubs.total.env, permutations = 999)
+permutest(doubs.total.space, permutations = 999)
+
+# Perform variation partitioning
+doubs.varpart <- varpart(fish.db, env.mod, space.mod)
+summary(doubs.varpart)
+
+# Set plot margins and plot variation partitioning
+plot.new()
+par(mar = c(2,2,2,2))
+plot(doubs.varpart)
+
+#unable to run the text code. It says plot.new has not been called yet, even when I run plot.new()
 
 ```
 
 ***Question 4***: Interpret the variation partitioning results.   
 
-> ***Answer 4***: 
+> ***Answer 4***: Overall, we see that there are both environmental and spatial effects along with a combined effect of both. Based off the summary of the varpart we see that the water quality (varaibles together) controbutes to 13% of the total variation, Spatial effects explain 23% of the total variation, a combination of both effects (since resources depend on spatial factors) explains 18% of the variation. All of this accoutn for 55% of what explains fish community composition while the rest - 45% is the residual variation that is not account for by any of the variables in this dataset. 
 
 ## SYNTHESIS
 
