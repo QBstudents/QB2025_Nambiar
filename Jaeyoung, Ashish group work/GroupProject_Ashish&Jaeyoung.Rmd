@@ -1,0 +1,585 @@
+---
+title: 'QB Group Project'
+author: "Ashish Nambiar and Jaeyoung Yoo; Z620: Quantitative Biodiversity, Indiana University"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+geometry: margin=2.54cm
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+setwd("/cloud/project/QB2025_Yoo/GroupProject")
+
+# Load necessary libraries & load data
+library(tidyr)
+library(dplyr)
+
+package.list <- c("vegan", "ade4", "viridis", "gplots", "indicspecies", "ggplot2", "multcompView")
+for (package in package.list) {
+  if (!require(package, character.only = TRUE, quietly = TRUE)) {
+    install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+```
+
+```{R, include = FALSE}
+##Manually apply BiodiversityR package
+add.spec.scores <-
+  function(ordi,comm,method="cor.scores",multi=1,Rscale=F,scaling="1") {
+    ordiscores <- scores(ordi,display="sites")
+    n <- ncol(comm)
+    p <- ncol(ordiscores)
+    specscores <- array(NA,dim=c(n,p))
+    rownames(specscores) <- colnames(comm)
+    colnames(specscores) <- colnames(ordiscores)
+    if (method == "cor.scores") {
+      for (i in 1:n) {
+        for (j in 1:p) {specscores[i,j] <- cor(comm[,i],ordiscores[,j],method="pearson")}
+      }
+    }
+    if (method == "wa.scores") {specscores <- wascores(ordiscores,comm)}
+    if (method == "pcoa.scores") {
+      rownames(ordiscores) <- rownames(comm)
+      eigenv <- ordi$eig
+      accounted <- sum(eigenv)
+      tot <- 2*(accounted/ordi$GOF[2])-(accounted/ordi$GOF[1])
+      eigen.var <- eigenv/(nrow(comm)-1)
+      neg <- length(eigenv[eigenv<0])
+      pos <- length(eigenv[eigenv>0])
+      tot <- tot/(nrow(comm)-1)
+      eigen.percen <- 100*eigen.var/tot
+      eigen.cumpercen <- cumsum(eigen.percen)
+      constant <- ((nrow(comm)-1)*tot)^0.25
+      ordiscores <- ordiscores * (nrow(comm)-1)^-0.5 * tot^-0.5 * constant
+      p1 <- min(p, pos)
+      for (i in 1:n) {
+        for (j in 1:p1) {
+          specscores[i,j] <- cor(comm[,i],ordiscores[,j])*sd(comm[,i])/sd(ordiscores[,j])
+          if(is.na(specscores[i,j])) {specscores[i,j]<-0}
+        }
+      }
+      if (Rscale==T && scaling=="2") {
+        percen <- eigen.var/tot
+        percen <- percen^0.5
+        ordiscores <- sweep(ordiscores,2,percen,"/")   
+        specscores <- sweep(specscores,2,percen,"*")
+      }
+      if (Rscale==F) {
+        specscores <- specscores / constant
+        ordiscores <- ordi$points
+      }        
+      ordi$points <- ordiscores
+      ordi$eig <- eigen.var
+      ordi$eig.percen <- eigen.percen
+      ordi$eig.cumpercen <- eigen.cumpercen
+      ordi$eigen.total <- tot
+      ordi$R.constant <- constant
+      ordi$Rscale <- Rscale
+      ordi$scaling <- scaling
+    }
+    specscores <- specscores * multi    
+    ordi$cproj <- specscores
+    return(ordi)
+  }
+```
+
+
+## 1. Site-by-species matrix
+
+```{r}
+df <- read.csv("lambir_LDW.csv", stringsAsFactors = FALSE)
+
+df$Site_ID <- paste(df$Forest, df$myc_type, df$plot_id, df$canopy_layer, sep = "-")
+
+# Create presence-absence or abundance table
+final_df <- df %>%
+  group_by(Site_ID, myc_type, Forest, canopy_layer, Latin) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = Latin, values_from = count, values_fill = 0) %>%
+  ungroup()
+
+# Set Site_ID as row names and remove metadata columLatin# Set Site_ID as row names and remove metadata columns from the matrix
+final_df <- final_df[, -1]
+site_species_matrix <- final_df[, -c(1:3)]  # Keep only species columns
+variable <- final_df[, c(1:3)]
+```
+
+## 2. Alpha-Diversity
+
+```{r}
+# Calculate richness
+richness <- specnumber(site_species_matrix)
+
+# Calculate Simpson's diversity (1-D)
+simpson <- simpson.unb(site_species_matrix, inverse = FALSE)
+
+# Calculate Shannon's diversity
+#diversity(site_species_matrix, index = "shannon")
+
+#Add richness, Simpson and Shannon in the dataset
+variable$Site_ID <- paste(rownames(variable))
+rich <- data.frame(Site_ID = rownames(site_species_matrix), Richness = richness)
+variable <- variable %>%
+  left_join(rich, by = "Site_ID")
+
+simp <- data.frame(Site_ID = rownames(site_species_matrix), Simpson = simpson)
+variable <- variable %>%
+  left_join(simp, by = "Site_ID")
+
+#shan <- data.frame(Site_ID = rownames(site_species_matrix), Shannon = shannon)
+#variable <- variable %>%
+#  left_join(shan, by = "Site_ID")
+```
+
+
+```{r}
+## Plot richness
+# Function to summarize data
+data_summary <- function(data) {
+  data %>%
+    group_by(canopy_layer, myc_type) %>%
+    summarise(
+      mean_richness = mean(Richness, na.rm = TRUE),
+      se_richness = sd(Richness, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+# Function to add "Total" category
+data_total <- function(data) {
+  data %>%
+    group_by(canopy_layer) %>%
+    summarise(
+      myc_type = "Total",
+      mean_richness = mean(Richness, na.rm = TRUE),
+      se_richness = sd(Richness, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+# Filter data for Temperate and Tropical forests
+temperate_data <- variable %>% filter(Forest == "Temperate")
+temperate_data$canopy_layer <- as.factor(temperate_data$canopy_layer)
+
+# Process data for both forest types
+temperate_plot_data <- bind_rows(data_summary(temperate_data), data_total(temperate_data))
+
+# Run ANOVA - Total - Temperate
+anova_result1 <- aov(Richness ~ canopy_layer, data = temperate_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Temperate
+anova_result2 <- aov(Richness ~ canopy_layer * myc_type, data = temperate_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+# Create Tukey letters - Temperate
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+temperate_plot_data <- merge(temperate_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+temperate_plot_data$canopy_layer <- as.numeric(temperate_plot_data$canopy_layer)
+
+# Create plots
+ggplot(temperate_plot_data, aes(x = canopy_layer, y = mean_richness, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness, ymax = mean_richness + se_richness), width = 0.2) +
+  geom_line() +
+#  geom_smooth(aes(group = myc_type), method = "lm", se = FALSE, linetype = "solid") +
+  theme_minimal() +
+  labs(
+    title = "Richness by Canopy Layer and Mycorrhizal Type (Temperate)",
+    x = "Canopy Layer",
+    y = "Mean Richness",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+  geom_text(aes(label = Letters), vjust = -1, size = 7)
+```
+
+
+```{r}
+# Repeat for tropical
+tropical_data <- variable %>% filter(Forest == "Tropical")
+tropical_data$canopy_layer <- as.factor(tropical_data$canopy_layer)
+
+tropical_plot_data <- bind_rows(data_summary(tropical_data), data_total(tropical_data))
+
+# Run ANOVA - Total - Temperate
+anova_result1 <- aov(Richness ~ canopy_layer, data = tropical_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Temperate
+anova_result2 <- aov(Richness ~ canopy_layer * myc_type, data = tropical_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+# Create Tukey letters - Temperate
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+tropical_plot_data <- merge(tropical_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+tropical_plot_data$canopy_layer <- as.numeric(tropical_plot_data$canopy_layer)
+
+# Create plots
+ggplot(tropical_plot_data, aes(x = canopy_layer, y = mean_richness, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_richness - se_richness, ymax = mean_richness + se_richness), width = 0.2) +
+  geom_line() +
+#  geom_smooth(aes(group = myc_type), method = "lm", se = FALSE, linetype = "solid") +
+  theme_minimal() +
+  labs(
+    title = "Richness by Canopy Layer and Mycorrhizal Type (Tropical)",
+    x = "Canopy Layer",
+    y = "Mean Richness",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+  geom_text(aes(label = Letters), vjust = -0.5, size = 7)
+```
+
+
+```{r}
+## Plot Simpson's diversity
+# Function to summarize data
+data_summary <- function(data) {
+  data %>%
+    group_by(canopy_layer, myc_type) %>%
+    summarise(
+      mean_simpson = mean(Simpson, na.rm = TRUE),
+      se_simpson = sd(Simpson, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+# Function to add "Total" category
+data_total <- function(data) {
+  data %>%
+    group_by(canopy_layer) %>%
+    summarise(
+      myc_type = "Total",
+      mean_simpson = mean(Simpson, na.rm = TRUE),
+      se_simpson = sd(Simpson, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+# Filter data for Temperate and Tropical forests
+temperate_data <- variable %>% filter(Forest == "Temperate")
+temperate_data$canopy_layer <- as.factor(temperate_data$canopy_layer)
+
+# Process data for both forest types
+temperate_plot_data <- bind_rows(data_summary(temperate_data), data_total(temperate_data))
+
+tropical_data <- variable %>% filter(Forest == "Tropical")
+tropical_data$canopy_layer <- as.factor(tropical_data$canopy_layer)
+
+tropical_plot_data <- bind_rows(data_summary(tropical_data), data_total(tropical_data))
+
+# Run ANOVA - Total - Temperate
+anova_result1 <- aov(Simpson ~ canopy_layer, data = temperate_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Temperate
+anova_result2 <- aov(Simpson ~ canopy_layer * myc_type, data = temperate_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+# Create Tukey letters - Temperate
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+temperate_plot_data <- merge(temperate_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+temperate_plot_data$canopy_layer <- as.numeric(temperate_plot_data$canopy_layer)
+
+# Create plots
+ggplot(temperate_plot_data, aes(x = canopy_layer, y = mean_simpson, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_simpson - se_simpson, ymax = mean_simpson + se_simpson), width = 0.2) +
+  geom_line() +
+#  geom_smooth(aes(group = myc_type), method = "lm", se = FALSE, linetype = "solid") +
+  theme_minimal() +
+  labs(
+    title = "Simpson's diversity by Canopy Layer and Mycorrhizal Type (Temperate)",
+    x = "Canopy Layer",
+    y = "Mean Simpson's diversity (1-D)",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+   geom_text(aes(label = Letters), vjust = -1, size = 7)
+```
+
+
+```{r}
+# Repeat for tropical
+tropical_data <- variable %>% filter(Forest == "Tropical")
+tropical_data$canopy_layer <- as.factor(tropical_data$canopy_layer)
+
+tropical_plot_data <- bind_rows(data_summary(tropical_data), data_total(tropical_data))
+
+# Run ANOVA - Total - Tropical
+anova_result1 <- aov(Simpson ~ canopy_layer, data = tropical_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Tropical
+anova_result2 <- aov(Simpson ~ canopy_layer * myc_type, data = tropical_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+# Create Tukey letters - Tropical
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+tropical_plot_data <- merge(tropical_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+tropical_plot_data$canopy_layer <- as.numeric(tropical_plot_data$canopy_layer)
+
+# Create plots
+ggplot(tropical_plot_data, aes(x = canopy_layer, y = mean_simpson, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_simpson - se_simpson, ymax = mean_simpson + se_simpson), width = 0.2) +
+  geom_line() +
+#  geom_smooth(aes(group = myc_type), method = "lm", se = FALSE, linetype = "solid") +
+  theme_minimal() +
+  labs(
+    title = "Simpson's diversity by Canopy Layer and Mycorrhizal Type (Tropical)",
+    x = "Canopy Layer",
+    y = "Mean Simpson's diversity (1-D)",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+  geom_text(aes(label = Letters), vjust = 1.5, size = 7)
+```
+
+
+```{r}
+## Shannon diversity
+
+# Load data
+df <- read.csv("lambir_LDW.csv", stringsAsFactors = FALSE)
+
+# Create a unique Site ID using site-specific columns
+df$Site_ID <- paste(df$Forest, df$myc_type, df$plot_id, df$canopy_layer, sep = "-")
+
+# Create a species-site abundance matrix
+site_species_matrix <- df %>%
+  group_by(Site_ID, Latin) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = Latin, values_from = count, values_fill = 0)
+
+# Extract metadata and ensure species-site matrix is numeric
+variable <- site_species_matrix[, 1, drop = FALSE]  # Keep only Site_ID for merging later
+site_species_matrix <- site_species_matrix[, -1]   # Remove Site_ID column
+site_species_matrix <- as.matrix(site_species_matrix)  # Convert to matrix
+mode(site_species_matrix) <- "numeric"  # Ensure numeric format
+
+rownames(site_species_matrix) <- unique(df$Site_ID)  # Assign only unique Site_IDs
+
+
+# Compute Shannon diversity
+shannon <- diversity(site_species_matrix, index = "shannon")
+
+
+# Store Shannon values in a dataframe
+shan <- data.frame(Site_ID = rownames(site_species_matrix), Shannon = shannon)
+
+variable <- df %>%
+  distinct(Site_ID, .keep_all = TRUE) %>%  # Ensure unique Site_IDs
+  select(Site_ID, Forest, canopy_layer, myc_type) %>%
+  left_join(shan, by = "Site_ID") %>%
+  drop_na(Shannon)  # Remove missing Shannon values
+
+# Ensure structure is correct
+str(variable)
+
+## Function to summarize Shannon diversity
+data_summary <- function(data) {
+  data %>%
+    group_by(canopy_layer, myc_type) %>%
+    summarise(
+      mean_Shannon = mean(Shannon, na.rm = TRUE),
+      se_Shannon = sd(Shannon, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+## Function to add "Total" category
+data_total <- function(data) {
+  data %>%
+    group_by(canopy_layer) %>%
+    summarise(
+      myc_type = "Total",
+      mean_Shannon = mean(Shannon, na.rm = TRUE),
+      se_Shannon = sd(Shannon, na.rm = TRUE) / sqrt(n()),
+      .groups = 'drop'
+    )
+}
+
+
+## Filter data for Temperate and Tropical forests
+temperate_data <- variable %>% filter(Forest == "Temperate")
+temperate_data$canopy_layer <- as.factor(temperate_data$canopy_layer)
+
+# Run ANOVA - Total - Temperate
+anova_result1 <- aov(Shannon ~ canopy_layer, data = temperate_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Temperate
+anova_result2 <- aov(Shannon ~ canopy_layer * myc_type, data = temperate_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+## Process data for both forest types
+temperate_plot_data <- bind_rows(data_summary(temperate_data), data_total(temperate_data))
+
+# Create Tukey letters - Temperate
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+temperate_plot_data <- merge(temperate_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+temperate_plot_data$canopy_layer <- as.numeric(temperate_plot_data$canopy_layer)
+
+
+## Create Shannon diversity plots
+
+ggplot(temperate_plot_data, aes(x = canopy_layer, y = mean_Shannon, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_Shannon - se_Shannon, ymax = mean_Shannon + se_Shannon), width = 0.2) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    title = "Shannon Diversity by Canopy Layer and Mycorrhizal Type (Temperate)",
+    x = "Canopy Layer",
+    y = "Mean Shannon Diversity",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+  geom_text(aes(label = Letters), vjust = -1, size = 7)
+```
+
+```{r}
+# Repeat for tropical
+tropical_data <- variable %>% filter(Forest == "Tropical")
+tropical_plot_data <- bind_rows(data_summary(tropical_data), data_total(tropical_data))
+tropical_data$canopy_layer <- as.factor(tropical_data$canopy_layer)
+
+# Run ANOVA - Total - Tropical
+anova_result1 <- aov(Shannon ~ canopy_layer, data = tropical_data)
+summary(anova_result1)
+tukey_result1 <- TukeyHSD(anova_result1)
+
+# Run ANOVA - AM & EcM - Tropical
+anova_result2 <- aov(Shannon ~ canopy_layer * myc_type, data = tropical_data)
+summary(anova_result2)
+tukey_result2 <- TukeyHSD(anova_result2)
+
+# Create Tukey letters - Tropical
+tukey_letters1 <- multcompLetters4(anova_result1, tukey_result1)
+tukey_letters2 <- multcompLetters4(anova_result2, tukey_result2)
+tukey_df1 <- data.frame(canopy_layer = names(tukey_letters1$`canopy_layer`$Letters), 
+                       Letters = tukey_letters1$`canopy_layer`$Letters,
+                       myc_type = rep("Total"))
+tukey_df2 <- data.frame(var = names(tukey_letters2$`canopy_layer:myc_type`$Letters), 
+                       Letters = tukey_letters2$`canopy_layer:myc_type`$Letters)
+tukey_df2$myc_type <- sub(".*:", "", tukey_df2$var)
+tukey_df2$canopy_layer <- sub(":.*", "", tukey_df2$var)
+tukey_df2 <- tukey_df2[,-1]
+tukey_df <- rbind(tukey_df1, tukey_df2)
+
+tropical_plot_data <- merge(tropical_plot_data, tukey_df, by = c("myc_type", "canopy_layer"), all = TRUE)
+tropical_plot_data$canopy_layer <- as.numeric(tropical_plot_data$canopy_layer)
+
+#Plot
+ggplot(tropical_plot_data, aes(x = canopy_layer, y = mean_Shannon, color = myc_type)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = mean_Shannon - se_Shannon, ymax = mean_Shannon + se_Shannon), width = 0.2) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    title = "Shannon Diversity by Canopy Layer and Mycorrhizal Type (Tropical)",
+    x = "Canopy Layer",
+    y = "Mean Shannon Diversity",
+    color = "Mycorrhizal Type"
+  ) +
+  scale_color_manual(values = c("blue", "red", "black")) +
+  geom_text(aes(label = Letters), vjust = -0.5, size = 7)
+```
+
+
+```{r}
+## Count occurrences of each species per site and get the top 2 frequent species
+top_species_per_site <- df %>%
+  group_by(Forest, myc_type, canopy_layer, Latin) %>%  
+  summarise(freq = n(), .groups = 'drop') %>%  
+  arrange(Forest, myc_type, canopy_layer, desc(freq)) %>%  
+  group_by(Forest, myc_type, canopy_layer) %>%  
+  slice_head(n = 2)  
+
+write.csv(top_species_per_site, "top2_species.csv")
+```
+
+
+## 3. Beta-Diversity - Hypothesis testing
+
+```{r, include=FALSE}
+# Run PERMANOVA with adonis function
+#adonis2(site_species_matrix ~ variable$canopy_layer, method = "jaccard", permutations = 999)
+#adonis2(site_species_matrix ~ variable$canopy_layer * variable$Forest * variable$myc_type, method = "jaccard", permutations = 999)
+
+#adonis2(site_species_matrix ~ variable$canopy_layer, method = "bray", permutations = 999)
+#adonis2(site_species_matrix ~ variable$canopy_layer * variable$Forest * variable$myc_type, method = "bray", permutations = 999)
+
+# Indicator value
+#indval <- multipatt(site_species_matrix, cluster = variable$canopy_layer, func = "IndVal.g", control = how(nperm=999))
+#summary(indval)
+```
